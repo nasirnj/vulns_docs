@@ -1,0 +1,72 @@
+Here’s a breakdown of each vulnerability you listed, plus remediation strategies and caveats. (We’ll want to adapt to your actual codebase / deployment environment.)
+
+---
+
+## Vulnerability: CVE-2024-24790 (stdlib / Go)
+
+* **What it is / scope**
+  This is a flaw in the Go standard library (specifically `net/netip`), where various `Is*()` methods (e.g. `IsPrivate()`, `IsLoopback()`, etc.) do not behave correctly when dealing with IPv4-mapped IPv6 addresses. ([NVD][1])
+  In your table, it shows “Is Base Image Vulnerability: Yes” which suggests that the base container image (or runtime image) includes a Go runtime version vulnerable to this issue.
+
+* **How to remediate / fix**
+
+  1. **Upgrade Go runtime / base image**
+     You'll need to upgrade the Go standard library (i.e. use a Go version that has this fixed). The fix is included in Go 1.21.11 (and relevant patch versions). ([GitHub][2])
+     So your container’s base image must use a Go version ≥ 1.21.11 (or whatever is the patched version in your distribution). ([GitHub][2])
+     In some sources, “update the stdlib package to version 1.21.11 or 1.22.4” is recommended. ([Vulert][3])
+  2. **Rebuild / republish your application image**
+     Once your base image / Go version is upgraded, rebuild your binaries and container images (or whatever packaging you use), so that the fixed library is incorporated.
+  3. **Verify no residual vulnerability**
+     After rebuild, re-scan the image (with your SCA / vulnerability scanner) to ensure the CVE is no longer flagged.
+
+* **Caveats / special notes**
+
+  * If your application code or dependencies pin Go to an older version (e.g. via modules or environment constraints), you must lift those constraints.
+  * If the “base image” is provided by a third party (e.g., a vendor-provided Go container), you may need to push for an updated base.
+  * In some distributions (Debian, Ubuntu) a particular Go version package may have the fix “backported,” so check your distro’s security advisories. ([Ubuntu][4])
+  * There is a note saying in Debian’s security tracker that this CVE is under “Name, CVE-2024-24790… resolved” entries. ([security-tracker.debian.org][5])
+  * In some cases this might be a false positive, depending on how the scanner maps “stdlib vulnerability” to your binary; confirm whether the function usage paths are relevant.
+
+---
+
+## Vulnerability: CVE-2020-7788 (ini, npm package)
+
+* **What it is / scope**
+  This is a *prototype pollution* vulnerability in the `ini` npm package (versions before 1.3.6). If an attacker can supply a crafted INI file to `ini.parse`, they could inject properties into the object prototype, which can lead to security issues (depending on context). ([NVD][6])
+
+* **How to remediate / fix**
+
+  1. **Upgrade the `ini` package**
+     Bump `ini` to version **1.3.6 or later**. ([VulnGuide][7])
+  2. **Review where and how `ini.parse` is used**
+     If there are places in your code that process untrusted INI input (e.g. user-supplied configuration files), consider sanitizing input or restricting usage.
+  3. **Re-run security scans / regressions**
+     After upgrading, re-scan your code and test to ensure the vulnerability is no longer detected.
+
+* **Caveats / special notes**
+
+  * If `ini` is used indirectly (transitive dependency), you might need to use an override mechanism (e.g. in `package.json` / `npm` or `yarn` resolutions or `npm-force-resolutions`) to force the patched version.
+  * If the code relying on INI parsing expects older behavior, test for breakage.
+  * Because this is JavaScript / Node, runtime environments (inside containers, etc.) should also be updated, not just source code.
+
+---
+
+## Vulnerability: CVE-2019-19919 (handlebars, npm package)
+
+* **What it is / scope**
+  Handlebars versions prior to **4.3.0** (or 3.0.8 in some branches) are vulnerable to prototype pollution, which could lead to remote code execution under certain conditions. ([NVD][8])
+
+* **How to remediate / fix**
+
+  1. **Upgrade handlebars**
+     Update to version **4.3.0 or newer** (or 3.0.8+, depending on your version track) to eliminate this vulnerability. ([VulnGuide][9])
+  2. **Audit templates / usage**
+     If your code uses user-supplied templates or manipulates objects dynamically, audit those pathways to ensure no direct pollution is possible.
+  3. **Re-scan and test**
+     After upgrade and code refactoring, re-run your scans to confirm fix, and perform regression testing.
+
+* **Caveats / special notes**
+
+  * As noted in one of your lines, the resource path is `/usr/lib/code-server/lib/vscode/extensions/handlebars`. In some contexts, security scanners may flag a “handlebars” folder in an extension but this might not correspond to the vulnerable npm package—i.e. **false positive**. Indeed, there is a discussion that in the `code-server` environment, some handlebars-related CVE findings are false positives, because the scanner misaligns the extension name with the npm package name. ([GitHub][10])
+  * Before doing an upgrade, confirm that the flagged vulnerability is genuinely applicable (i.e. that the extension is running the vulnerable code path). If it's truly unused in runtime, you might document it as a “false positive” after validation.
+  * If the extension is maintained by a third party (e.g. VSCode plugin), consider patching or updating that extension rather than your own code.
